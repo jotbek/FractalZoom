@@ -2,6 +2,12 @@
 
 FractalZoom is an interactive fractal viewer built using Python, Pyglet, and OpenGL. Explore a variety of fractal sets in real time with smooth zooming, panning, dynamic color animations, and easy screenshot saving.
 
+![FractalZoom Screenshot 1](screenshots/screenshot1.png)
+*FractalZoom displaying the Mandelbrot set.*
+
+![FractalZoom Screenshot 2](screenshots/screenshot2.png)
+*Help screen.*
+
 ## Features
 
 - **Interactive Fractal Exploration**
