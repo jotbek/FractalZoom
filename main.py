@@ -2,8 +2,16 @@ import pyglet
 from pyglet.gl import *
 import numpy as np
 import ctypes
+import time   # For timestamping (if needed)
+import os     # For file path handling
+import tkinter as tk
+from tkinter import filedialog
 
-# Funkcje pomocnicze do kompilacji shaderów
+# Initialize tkinter root (it remains hidden)
+root = tk.Tk()
+root.withdraw()
+
+# --- Shader helper functions ---
 def create_shader(shader_type, source):
     shader = glCreateShader(shader_type)
     source = source.encode('utf-8')
@@ -53,7 +61,7 @@ def print_program_log(program):
         glGetProgramInfoLog(program, length, None, log)
         print(log.value.decode('utf-8'))
 
-# Definicja shaderów
+# --- Shader sources ---
 vertex_shader_source = """
 #version 400 core
 layout(location = 0) in vec2 position;
@@ -65,7 +73,6 @@ void main()
 }
 """
 
-# Słownik shaderów fragmentów dla różnych fraktali (z użyciem double)
 fractal_shaders = {
     'mandelbrot': """
     #version 400 core
@@ -79,32 +86,27 @@ fractal_shaders = {
     
     vec3 hsv2rgb(vec3 c) {
         vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+        vec3 p = abs(fract(c.xxx + K.xyz)*6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
     
     void main()
     {
-        dvec2 uv = dvec2(fragCoord.xy + 1.0) / 2.0;
-        uv.x *= double(u_resolution.x) / double(u_resolution.y);
-        dvec2 c = (uv - dvec2(0.5, 0.5)) * u_scale + u_center;
+        dvec2 uv = dvec2(fragCoord.xy+1.0)/2.0;
+        uv.x *= double(u_resolution.x)/double(u_resolution.y);
+        dvec2 c = (uv-dvec2(0.5,0.5))*u_scale + u_center;
         dvec2 z = c;
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            z = dvec2(
-                z.x * z.x - z.y * z.y + c.x,
-                2.0 * z.x * z.y + c.y
-            );
+        for(i = 0; i < maxIterations; i++){
+            if(dot(z,z) > 4.0) break;
+            z = dvec2(z.x*z.x - z.y*z.y + c.x,
+                      2.0*z.x*z.y + c.y);
         }
-        float t = float(i) / float(maxIterations);
-    
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-    
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'julia': """
@@ -116,34 +118,25 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p-K.xxx, 0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 z = uv;
         dvec2 c = dvec2(-0.8, 0.156);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            z = dvec2(
-                z.x * z.x - z.y * z.y,
-                2.0 * z.x * z.y
-            ) + c;
+        for(i=0; i<maxIterations; i++){
+            if(dot(z,z)>4.0) break;
+            z = dvec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'burning_ship': """
@@ -155,38 +148,26 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0 - K.www);
+        return c.z * mix(K.xxx, clamp(p-K.xxx, 0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            z = dvec2(
-                abs(z.x),
-                abs(z.y)
-            );
-            if (dot(z, z) > 4.0) break;
-            z = dvec2(
-                z.x * z.x - z.y * z.y,
-                2.0 * z.x * z.y
-            ) + c;
+        for(i=0;i<maxIterations;i++){
+            z = dvec2(abs(z.x), abs(z.y));
+            if(dot(z,z)>4.0) break;
+            z = dvec2(z.x*z.x - z.y*z.y, 2.0*z.x*z.y) + c;
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'tricorn': """
@@ -198,34 +179,25 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+        return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            z = dvec2(
-                z.x * z.x - z.y * z.y,
-                -2.0 * z.x * z.y
-            ) + c;
+        for(i=0;i<maxIterations;i++){
+            if(dot(z,z)>4.0) break;
+            z = dvec2(z.x*z.x - z.y*z.y, -2.0*z.x*z.y) + c;
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'multibrot3': """
@@ -237,37 +209,28 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+        return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            // z = z^3 + c
+        for(i=0;i<maxIterations;i++){
+            if(dot(z,z)>4.0) break;
             double x = z.x;
             double y = z.y;
-            z = dvec2(
-                x * x * x - 3.0 * x * y * y + c.x,
-                3.0 * x * x * y - y * y * y + c.y
-            );
+            z = dvec2(x*x*x - 3.0*x*y*y + c.x,
+                      3.0*x*x*y - y*y*y + c.y);
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'multibrot4': """
@@ -279,37 +242,28 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+        return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            // z = z^4 + c
+        for(i=0;i<maxIterations;i++){
+            if(dot(z,z)>4.0) break;
             double x = z.x;
             double y = z.y;
-            z = dvec2(
-                x * x * x * x - 6.0 * x * x * y * y + y * y * y * y + c.x,
-                4.0 * x * x * x * y - 4.0 * x * y * y * y + c.y
-            );
+            z = dvec2(x*x*x*x - 6.0*x*x*y*y + y*y*y*y + c.x,
+                      4.0*x*x*x*y - 4.0*x*y*y*y + c.y);
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'perpendicular_mandelbrot': """
@@ -321,34 +275,25 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+        return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            z = dvec2(
-                z.x * z.x - z.y * z.y,
-                -2.0 * abs(z.x * z.y)
-            ) + c;
+        for(i=0;i<maxIterations;i++){
+            if(dot(z,z)>4.0) break;
+            z = dvec2(z.x*z.x - z.y*z.y, -2.0*abs(z.x*z.y)) + c;
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """,
     'celtic_mandelbrot': """
@@ -360,44 +305,37 @@ fractal_shaders = {
     uniform vec2 u_resolution;
     uniform float u_time;
     uniform bool u_color_animation;
-
-    vec3 hsv2rgb(vec3 c) {
-        vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-        vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-        return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+    vec3 hsv2rgb(vec3 c){
+        vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+        vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+        return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
     }
-
-    void main()
-    {
-        dvec2 uv = (fragCoord.xy) * u_scale + u_center;
+    void main(){
+        dvec2 uv = (fragCoord.xy)*u_scale + u_center;
         dvec2 c = uv;
         dvec2 z = dvec2(0.0);
         int maxIterations = 1000;
         int i;
-        for (i = 0; i < maxIterations; i++)
-        {
-            if (dot(z, z) > 4.0) break;
-            double x_new = abs(z.x * z.x - z.y * z.y) + c.x;
-            z.y = 2.0 * z.x * z.y + c.y;
+        for(i=0;i<maxIterations;i++){
+            if(dot(z,z)>4.0) break;
+            double x_new = abs(z.x*z.x - z.y*z.y) + c.x;
+            z.y = 2.0*z.x*z.y + c.y;
             z.x = x_new;
         }
-        float t = float(i) / float(maxIterations);
-
+        float t = float(i)/float(maxIterations);
         float hueShift = u_color_animation ? u_time : 0.0;
-        vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-
-        outColor = vec4(color, 1.0);
+        vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+        outColor = vec4(color,1.0);
     }
     """
 }
 
-# Shader do rysowania palety kolorów (bez zmian)
+# Shader for drawing the color palette (remains unchanged)
 palette_vertex_shader_source = """
 #version 400 core
 layout(location = 0) in vec2 position;
 out float t_value;
-void main()
-{
+void main(){
     t_value = position.x;
     gl_Position = vec4(position, 0.0, 1.0);
 }
@@ -408,36 +346,31 @@ palette_fragment_shader_source = """
 in float t_value;
 out vec4 outColor;
 uniform float u_time;
-
-vec3 hsv2rgb(vec3 c) {
-    vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
-    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
-    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+vec3 hsv2rgb(vec3 c){
+    vec4 K = vec4(1.0,2.0/3.0,1.0/3.0,3.0);
+    vec3 p = abs(fract(c.xxx+K.xyz)*6.0-K.www);
+    return c.z*mix(K.xxx, clamp(p-K.xxx,0.0,1.0), c.y);
 }
-
-void main()
-{
+void main(){
     float t = t_value;
     float hueShift = u_time;
-    vec3 color = hsv2rgb(vec3(mod(t * 5.0 + hueShift, 1.0), 1.0, 1.0));
-    outColor = vec4(color, 1.0);
+    vec3 color = hsv2rgb(vec3(mod(t*5.0+hueShift,1.0),1.0,1.0));
+    outColor = vec4(color,1.0);
 }
 """
 
-# Inicjalizacja okna
+# --- Window and OpenGL initialization ---
 config = pyglet.gl.Config(double_buffer=True, major_version=4, minor_version=0)
 window = pyglet.window.Window(resizable=True, config=config)
 window.set_caption("Fractal Viewer - jbk made THIS in 2024!")
-
-# Inicjalizacja OpenGL
 glClearColor(0, 0, 0, 1)
 
-# Wybór początkowego fraktala
+# Choose initial fractal and compile shaders
 current_fractal = 'mandelbrot'
 program = create_program(vertex_shader_source, fractal_shaders[current_fractal])
 palette_program = create_program(palette_vertex_shader_source, palette_fragment_shader_source)
 
-# Pobranie lokalizacji uniformów
+# Get uniform locations
 def get_uniform_locations():
     global u_center_location, u_scale_location, u_resolution_location
     global u_time_location, u_color_animation_location
@@ -448,36 +381,30 @@ def get_uniform_locations():
     u_color_animation_location = glGetUniformLocation(program, b'u_color_animation')
 
 get_uniform_locations()
-
 u_palette_time_location = glGetUniformLocation(palette_program, b'u_time')
 
-# Ustawienia początkowe
+# Initial view settings
 initial_center = [0.0, 0.0]
-initial_scale = 3.0  # Początkowa skala
+initial_scale = 3.0
 center = initial_center.copy()
 scale = initial_scale
 
-# Stan przycisków myszy
+# Mouse/keyboard state variables
 zoom_in = False
 zoom_out = False
-
-# Stan animacji kolorów
 color_animation = False
 color_time = 0.0
-
-# Stan klawiszy strzałek
 pan_left = False
 pan_right = False
 pan_up = False
 pan_down = False
-
-# Stan ekranu pomocy
 show_help = False
-
-# Stan potwierdzenia wyjścia
 confirm_exit = False
 
-# Definicja wierzchołków kwadratu pokrywającego cały ekran
+# For the F1 Help hover hint
+show_hint = False
+
+# Vertices for a full-screen quad
 vertices = np.array([
     -1.0, -1.0,
      1.0, -1.0,
@@ -487,34 +414,29 @@ vertices = np.array([
      1.0,  1.0
 ], dtype=np.float32)
 
-# Konfiguracja VAO i VBO dla fraktala
+# Setup VAO and VBO for fractal rendering
 def setup_vao():
     global vao, vbo
     vao = GLuint()
     glGenVertexArrays(1, vao)
     glBindVertexArray(vao)
-
     vbo = GLuint()
     glGenBuffers(1, vbo)
     glBindBuffer(GL_ARRAY_BUFFER, vbo)
     glBufferData(GL_ARRAY_BUFFER, vertices.nbytes,
                  vertices.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
                  GL_STATIC_DRAW)
-
-    # Używamy stałej lokalizacji atrybutu 0
     glEnableVertexAttribArray(0)
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, ctypes.c_void_p(0))
-
     glBindBuffer(GL_ARRAY_BUFFER, 0)
     glBindVertexArray(0)
 
 setup_vao()
 
-# Konfiguracja VAO i VBO dla palety kolorów
+# Setup VAO and VBO for the color palette
 palette_vao = GLuint()
 glGenVertexArrays(1, palette_vao)
 glBindVertexArray(palette_vao)
-
 palette_vertices = np.array([
     0.0, -1.0,
     1.0, -1.0,
@@ -523,56 +445,48 @@ palette_vertices = np.array([
     1.0, -1.0,
     1.0,  1.0
 ], dtype=np.float32)
-
 palette_vbo = GLuint()
 glGenBuffers(1, palette_vbo)
 glBindBuffer(GL_ARRAY_BUFFER, palette_vbo)
 glBufferData(GL_ARRAY_BUFFER, palette_vertices.nbytes,
              palette_vertices.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
              GL_STATIC_DRAW)
-
-# Używamy stałej lokalizacji atrybutu 0
 glEnableVertexAttribArray(0)
 glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, ctypes.c_void_p(0))
-
 glBindBuffer(GL_ARRAY_BUFFER, 0)
 glBindVertexArray(0)
 
-# Pozycja kursora
+# Mouse position
 mouse_x = 0
 mouse_y = 0
 
-# Tworzenie etykiety do wyświetlania poziomu zoomu
+# Create zoom level label
 zoom_label = pyglet.text.Label('Zoom: 1.00x',
                                font_name='Arial',
                                font_size=12,
                                bold=True,
-                               x=10, y=window.height - 10,
+                               x=10, y=window.height-10,
                                anchor_x='left', anchor_y='top',
-                               color=(255, 255, 255, 255))
+                               color=(255,255,255,255))
 
-# Tworzenie obiektu FPSDisplay
+# Create FPS display
 fps_display = pyglet.window.FPSDisplay(window)
 fps_display.label.font_size = 12
-fps_display.label.color = (255, 255, 255, 255)
+fps_display.label.color = (255,255,255,255)
 fps_display.label.bold = True
 fps_display.label.anchor_x = 'right'
 fps_display.label.anchor_y = 'top'
 
-# Etykieta "F1 Help" w prawym dolnym rogu
+# Create F1 Help label in bottom-right corner
 help_label = pyglet.text.Label('F1 Help',
                                font_name='Arial',
                                font_size=12,
                                bold=True,
-                               x=window.width - 10, y=10,
+                               x=window.width-10, y=10,
                                anchor_x='right', anchor_y='bottom',
-                               color=(255, 255, 255, 255))
+                               color=(255,255,255,255))
 
-# Tworzenie prostokąta dla ekranu pomocy i potwierdzenia wyjścia
-overlay = pyglet.shapes.Rectangle(0, 0, window.width, window.height, color=(0, 0, 0))
-overlay.opacity = int(0.8 * 255)
-
-# Definicja tekstu pomocy
+# Help entries (including screenshot key)
 help_entries = [
     ('Left Mouse Button', 'Zoom In'),
     ('Right Mouse Button', 'Zoom Out'),
@@ -588,10 +502,11 @@ help_entries = [
     ('F9', 'Multibrot (Power 3)'),
     ('F10', 'Multibrot (Power 4)'),
     ('F11', 'Perpendicular Mandelbrot'),
-    ('F12', 'Celtic Mandelbrot')
+    ('F12', 'Celtic Mandelbrot'),
+    ('S', 'Save Screenshot')
 ]
 
-def draw_text_with_outline(label, outline_color=(0, 0, 0, 255), outline_offset=1):
+def draw_text_with_outline(label, outline_color=(0,0,0,255), outline_offset=1):
     x = label.x
     y = label.y
     original_color = label.color
@@ -605,8 +520,8 @@ def draw_text_with_outline(label, outline_color=(0, 0, 0, 255), outline_offset=1
                (outline_offset, 0),
                (outline_offset, outline_offset)]
     for dx, dy in offsets:
-        label.x = x + dx
-        label.y = y + dy
+        label.x = x+dx
+        label.y = y+dy
         label.draw()
     label.x = x
     label.y = y
@@ -615,13 +530,11 @@ def draw_text_with_outline(label, outline_color=(0, 0, 0, 255), outline_offset=1
 
 def update(dt):
     global center, scale, color_time
-    color_time += dt * 0.1  # Szybkość animacji kolorów
-
+    color_time += dt * 0.1
     if confirm_exit or show_help:
         return
-
-    # Obsługa przesuwania obrazu
-    pan_speed = scale * 0.02  # Szybkość przesuwania zależna od skali
+    # Pan view with arrow keys
+    pan_speed = scale * 0.02
     if pan_left:
         center[0] -= pan_speed
     if pan_right:
@@ -630,43 +543,27 @@ def update(dt):
         center[1] += pan_speed
     if pan_down:
         center[1] -= pan_speed
-
     if zoom_in or zoom_out:
         width, height = window.get_size()
         ndc_x = (mouse_x / width)
         ndc_y = (mouse_y / height)
         ndc_y = 1.0 - ndc_y
-
-        if zoom_in:
-            factor = 0.98  # Wolniejsze przybliżanie
-        elif zoom_out:
-            factor = 1.02  # Wolniejsze oddalanie
-        else:
-            factor = 1.0
-
-        # Ograniczenie oddalania do stanu początkowego
+        factor = 0.98 if zoom_in else 1.02 if zoom_out else 1.0
         new_scale = scale * factor
         if new_scale > initial_scale:
             new_scale = initial_scale
             factor = new_scale / scale
-
-        # Obliczenie punktu w przestrzeni fraktala pod kursorem
-        c_re = (ndc_x - 0.5) * scale + center[0]
-        c_im = (ndc_y - 0.5) * scale + center[1]
-
-        # Aktualizacja skali
+        c_re = (ndc_x - 0.5)*scale + center[0]
+        c_im = (ndc_y - 0.5)*scale + center[1]
         scale = new_scale
-
-        # Aktualizacja centrum, aby punkt pod kursorem pozostał stały
-        center[0] = c_re - (ndc_x - 0.5) * scale
-        center[1] = c_im - (ndc_y - 0.5) * scale
+        center[0] = c_re - (ndc_x - 0.5)*scale
+        center[1] = c_im - (ndc_y - 0.5)*scale
 
 @window.event
 def on_draw():
     glClear(GL_COLOR_BUFFER_BIT)
     width, height = window.get_size()
-
-    # Rysowanie fraktala
+    # Draw fractal
     glUseProgram(program)
     glUniform2d(u_center_location, center[0], center[1])
     glUniform1d(u_scale_location, scale)
@@ -677,98 +574,89 @@ def on_draw():
     glDrawArrays(GL_TRIANGLES, 0, 6)
     glBindVertexArray(0)
     glUseProgram(0)
-
-    # Rysowanie palety kolorów
+    # Draw palette
     glUseProgram(palette_program)
     glUniform1f(u_palette_time_location, color_time)
     glBindVertexArray(palette_vao)
-    glViewport(0, 0, 200, 20)  # Przesunięcie palety do lewego dolnego rogu
+    glViewport(0,0,200,20)
     glDrawArrays(GL_TRIANGLES, 0, 6)
-    glViewport(0, 0, width, height)  # Resetowanie viewportu
+    glViewport(0,0,width,height)
     glBindVertexArray(0)
     glUseProgram(0)
-
-    # Aktualizacja i rysowanie etykiety z poziomem zoomu
+    # Update and draw zoom label
     zoom_factor = initial_scale / scale
     zoom_label.text = f'Zoom: {zoom_factor:.2f}x'
     draw_text_with_outline(zoom_label)
-
-    # Aktualizacja pozycji i rysowanie etykiety FPS z obwódką
-    fps_display.label.x = width - 10
-    fps_display.label.y = height - 10
+    # Update and draw FPS display
+    fps_display.label.x = width-10
+    fps_display.label.y = height-10
     draw_text_with_outline(fps_display.label)
-
-    # Rysowanie etykiety "F1 Help" z obwódką
-    help_label.x = width - 10
+    # Draw F1 Help label
+    help_label.x = width-10
     help_label.y = 10
     draw_text_with_outline(help_label)
-
-    # Wyświetlanie ekranu pomocy lub potwierdzenia wyjścia
+    # Draw hover hint box if mouse is over F1 Help label
+    if show_hint:
+        lines = [f"{key}: {desc}" for key, desc in help_entries]
+        hint_text = "\n".join(lines)
+        padding = 5
+        max_line_width = max([pyglet.text.Label(line, font_name='Arial', font_size=12).content_width for line in lines])
+        line_height = pyglet.text.Label("A", font_name='Arial', font_size=12).content_height
+        box_width = max_line_width + 2*padding
+        box_height = len(lines)*line_height + 2*padding
+        hint_x = width - 10 - box_width
+        hint_y = 10 + help_label.content_height + 10
+        hint_box = pyglet.shapes.Rectangle(hint_x, hint_y, box_width, box_height, color=(50,50,50))
+        hint_box.opacity = 200
+        hint_box.draw()
+        hint_label = pyglet.text.Label(hint_text,
+                                       font_name='Arial',
+                                       font_size=12,
+                                       x=hint_x + padding,
+                                       y=hint_y + box_height - padding,
+                                       anchor_x='left', anchor_y='top',
+                                       multiline=True,
+                                       width=box_width - 2*padding,
+                                       color=(255,255,255,255))
+        hint_label.draw()
+    # Draw help or exit overlay if active
     if show_help or confirm_exit:
-        # Aktualizacja rozmiaru overlayu
         overlay.width = width
         overlay.height = height
         overlay.draw()
-
         if show_help:
-            # Ustawienia dla tekstu pomocy
             font_size = 14
-            font_name = 'Courier New'  # Czcionka o stałej szerokości
+            font_name = 'Courier New'
             line_height = font_size * 1.5
-            start_y = height // 2 + (len(help_entries) // 2) * line_height
-            key_color = (200, 200, 200, 255)  # Jasno szary kolor dla kluczy
-            desc_color = (255, 255, 255, 255)  # Biały kolor dla opisów
-
-            # Obliczenie maksymalnej szerokości kluczy dla wyrównania
+            start_y = height//2 + (len(help_entries)//2)*line_height
+            key_color = (200,200,200,255)
+            desc_color = (255,255,255,255)
             max_key_width = 0
             for key, _ in help_entries:
-                label = pyglet.text.Label(f'{key}',
-                                          font_name=font_name,
-                                          font_size=font_size,
-                                          bold=False)
+                label = pyglet.text.Label(f'{key}', font_name=font_name, font_size=font_size, bold=False)
                 if label.content_width > max_key_width:
                     max_key_width = label.content_width
-
-            # Rysowanie każdej linii pomocy
             for i, (key, desc) in enumerate(help_entries):
-                y = start_y - i * line_height
-
-                # Rysowanie klucza
-                key_label = pyglet.text.Label(f'{key}',
-                                              font_name=font_name,
-                                              font_size=font_size,
-                                              x=width * 0.1, y=y,
-                                              anchor_x='left', anchor_y='center',
-                                              color=key_color)
+                y = start_y - i*line_height
+                key_label = pyglet.text.Label(f'{key}', font_name=font_name, font_size=font_size,
+                                              x=width*0.1, y=y, anchor_x='left', anchor_y='center', color=key_color)
                 key_label.draw()
-
-                # Rysowanie opisu
-                desc_label = pyglet.text.Label(desc,
-                                               font_name=font_name,
-                                               font_size=font_size,
-                                               x=width * 0.1 + max_key_width + 10, y=y,
-                                               anchor_x='left', anchor_y='center',
-                                               color=desc_color)
+                desc_label = pyglet.text.Label(desc, font_name=font_name, font_size=font_size,
+                                               x=width*0.1+max_key_width+10, y=y, anchor_x='left', anchor_y='center', color=desc_color)
                 desc_label.draw()
         elif confirm_exit:
-            # Wyświetlanie pytania o potwierdzenie wyjścia
             exit_text = "Are you sure you want to exit the program?\nPress Escape again to exit."
-            exit_label = pyglet.text.Label(exit_text,
-                                           font_name='Arial',
-                                           font_size=16,
-                                           x=width // 2, y=height // 2,
-                                           anchor_x='center', anchor_y='center',
-                                           multiline=True, width=width * 0.8,
-                                           color=(255, 255, 255, 255))
+            exit_label = pyglet.text.Label(exit_text, font_name='Arial', font_size=16,
+                                           x=width//2, y=height//2, anchor_x='center', anchor_y='center',
+                                           multiline=True, width=width*0.8, color=(255,255,255,255))
             exit_label.draw()
 
 @window.event
 def on_resize(width, height):
-    glViewport(0, 0, width, height)
-    zoom_label.y = height - 10  # Aktualizacja pozycji etykiety
+    glViewport(0,0,width,height)
+    zoom_label.y = height - 10
     help_label.x = width - 10
     help_label.y = 10
-    # Aktualizacja rozmiaru overlayu
     overlay.width = width
     overlay.height = height
 
@@ -795,29 +683,33 @@ def on_mouse_release(x, y, button, modifiers):
 
 @window.event
 def on_mouse_motion(x, y, dx, dy):
-    global mouse_x, mouse_y
+    global mouse_x, mouse_y, show_hint
     if confirm_exit or show_help:
         return
     mouse_x, mouse_y = x, y
+    left_bound = window.width - 10 - help_label.content_width
+    right_bound = window.width - 10
+    bottom_bound = 10
+    top_bound = 10 + help_label.content_height
+    if left_bound <= x <= right_bound and bottom_bound <= y <= top_bound:
+        show_hint = True
+    else:
+        show_hint = False
 
 @window.event
 def on_key_press(symbol, modifiers):
     global center, scale, color_animation, show_help, confirm_exit
-    global pan_left, pan_right, pan_up, pan_down
-    global program, current_fractal
-
+    global pan_left, pan_right, pan_up, pan_down, program, current_fractal
     if confirm_exit:
         if symbol == pyglet.window.key.ESCAPE:
             window.close()
         else:
             confirm_exit = False
         return True
-
     if show_help:
         if symbol == pyglet.window.key.F1 or symbol == pyglet.window.key.ESCAPE:
             show_help = False
         return True
-
     if symbol == pyglet.window.key.ESCAPE:
         confirm_exit = True
     elif symbol == pyglet.window.key.F1:
@@ -835,6 +727,14 @@ def on_key_press(symbol, modifiers):
         pan_up = True
     elif symbol == pyglet.window.key.DOWN:
         pan_down = True
+    elif symbol == pyglet.window.key.S:
+        filename = filedialog.asksaveasfilename(title="Save Screenshot",
+                                                  defaultextension=".png",
+                                                  filetypes=[("PNG files", "*.png")])
+        if filename:
+            screenshot = pyglet.image.get_buffer_manager().get_color_buffer()
+            screenshot.save(filename)
+            print(f"Screenshot saved as {filename}")
     elif symbol in [pyglet.window.key.F5, pyglet.window.key.F6, pyglet.window.key.F7,
                     pyglet.window.key.F8, pyglet.window.key.F9, pyglet.window.key.F10,
                     pyglet.window.key.F11, pyglet.window.key.F12]:
@@ -849,16 +749,13 @@ def on_key_press(symbol, modifiers):
             pyglet.window.key.F12: 'celtic_mandelbrot'
         }
         current_fractal = fractal_keys[symbol]
-
-        # Przeładuj shader fraktala po zmianie
         glDeleteProgram(program)
         program = create_program(vertex_shader_source, fractal_shaders[current_fractal])
         get_uniform_locations()
         center = initial_center.copy()
         scale = initial_scale
         setup_vao()
-
-    return True  # Zapobiega domyślnemu zachowaniu klawiszy (np. zamknięciu okna po naciśnięciu Escape)
+    return True
 
 @window.event
 def on_key_release(symbol, modifiers):
@@ -871,11 +768,14 @@ def on_key_release(symbol, modifiers):
         pan_up = False
     elif symbol == pyglet.window.key.DOWN:
         pan_down = False
+    return True
 
-    return True  # Zapobiega domyślnemu zachowaniu
+# Create overlay rectangle for help/exit screens
+overlay = pyglet.shapes.Rectangle(0, 0, window.width, window.height, color=(0,0,0))
+overlay.opacity = int(0.8*255)
 
-# Uruchomienie aktualizacji
-pyglet.clock.schedule_interval(update, 1/60)  # 60 FPS
+# Schedule update function at 60 FPS
+pyglet.clock.schedule_interval(update, 1/60)
 
-# Uruchomienie aplikacji
+# Run the application
 pyglet.app.run()
