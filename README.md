@@ -1,6 +1,10 @@
 # FractalZoom
 
-FractalZoom is an interactive fractal viewer built using Python, Pyglet, and OpenGL. Explore a variety of fractal sets in real time with smooth zooming, panning, dynamic color animations, and easy screenshot saving.
+FractalZoom is an interactive fractal viewer built using Python, Pyglet, and OpenGL. Explore a variety of fractal sets in real time with smooth zooming, panning, dynamic color animations, and easy screenshot saving. The application leverages custom GLSL shaders for fast, real-time fractal rendering.
+
+## Screenshots
+
+Here are some examples of FractalZoom in action:
 
 ![FractalZoom Screenshot 1](screenshots/screenshot1.png)
 *FractalZoom displaying the Mandelbrot set.*
@@ -20,6 +24,9 @@ FractalZoom is an interactive fractal viewer built using Python, Pyglet, and Ope
     - Multibrot (Power 4)
     - Perpendicular Mandelbrot
     - Celtic Mandelbrot
+
+- **Shader-Based Rendering**
+  - Utilizes custom GLSL shaders to perform fractal calculations directly on the GPU for high performance and smooth rendering.
 
 - **Zoom and Pan**
   - **Zoom In:** Left Mouse Button
